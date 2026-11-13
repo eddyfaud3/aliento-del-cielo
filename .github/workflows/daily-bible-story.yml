@@ -1,0 +1,83 @@
+name: Crear borrador de historia bíblica
+
+on:
+  workflow_dispatch:
+    inputs:
+      title:
+        description: "Título de la historia"
+        required: true
+        type: string
+      bible_reference:
+        description: "Referencia bíblica exacta"
+        required: true
+        type: string
+      summary:
+        description: "Resumen fiel del pasaje"
+        required: true
+        type: string
+      narration:
+        description: "Narración original en español (1–2 minutos)"
+        required: true
+        type: string
+      lesson:
+        description: "Lección espiritual"
+        required: true
+        type: string
+      facebook_question:
+        description: "Pregunta para generar comentarios"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  build-draft:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Crear archivo del borrador
+        env:
+          TITLE: ${{ inputs.title }}
+          BIBLE_REFERENCE: ${{ inputs.bible_reference }}
+          SUMMARY: ${{ inputs.summary }}
+          NARRATION: ${{ inputs.narration }}
+          LESSON: ${{ inputs.lesson }}
+          FACEBOOK_QUESTION: ${{ inputs.facebook_question }}
+        run: |
+          mkdir -p output
+          python - <<'PY'
+          import os
+          from pathlib import Path
+
+          def value(name):
+              return os.environ.get(name, "").strip()
+
+          fields = {
+              "Título": value("TITLE"),
+              "Referencia bíblica": value("BIBLE_REFERENCE"),
+              "Resumen": value("SUMMARY"),
+              "Narración": value("NARRATION"),
+              "Lección espiritual": value("LESSON"),
+              "Pregunta para Facebook": value("FACEBOOK_QUESTION"),
+          }
+
+          required = [key for key, content in fields.items() if not content]
+          if required:
+              raise SystemExit("Faltan campos obligatorios: " + ", ".join(required))
+
+          body = "# " + fields["Título"] + "\n\n"
+          body += "**Referencia:** " + fields["Referencia bíblica"] + "\n\n"
+          body += "## Resumen\n\n" + fields["Resumen"] + "\n\n"
+          body += "## Narración\n\n" + fields["Narración"] + "\n\n"
+          body += "## Lección espiritual\n\n" + fields["Lección espiritual"] + "\n\n"
+          body += "## Pregunta para Facebook\n\n" + fields["Pregunta para Facebook"] + "\n"
+          Path("output/historia-biblica.md").write_text(body, encoding="utf-8")
+          PY
+
+      - name: Guardar borrador como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: aliento-del-cielo-historia-biblica
+          path: output/historia-biblica.md
+          if-no-files-found: error
+          retention-days: 14
