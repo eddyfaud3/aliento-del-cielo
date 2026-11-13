@@ -1,0 +1,92 @@
+name: Generar narración bíblica en español
+
+on:
+  workflow_dispatch:
+    inputs:
+      narration:
+        description: "Texto final de la narración en español"
+        required: true
+        type: string
+      audio_name:
+        description: "Nombre del archivo de audio (sin extensión)"
+        required: true
+        default: "narracion-biblica"
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  generate-audio:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validar configuración
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID: ${{ secrets.ELEVENLABS_VOICE_ID }}
+          NARRATION: ${{ inputs.narration }}
+        run: |
+          test -n "$ELEVENLABS_API_KEY" || { echo "::error::Falta el secreto ELEVENLABS_API_KEY."; exit 1; }
+          test -n "$ELEVENLABS_VOICE_ID" || { echo "::error::Falta el secreto ELEVENLABS_VOICE_ID."; exit 1; }
+          test -n "$NARRATION" || { echo "::error::La narración está vacía."; exit 1; }
+
+      - name: Generar audio MP3 con ElevenLabs
+        env:
+          ELEVENLABS_API_KEY: ${{ secrets.ELEVENLABS_API_KEY }}
+          ELEVENLABS_VOICE_ID: ${{ secrets.ELEVENLABS_VOICE_ID }}
+          NARRATION: ${{ inputs.narration }}
+          AUDIO_NAME: ${{ inputs.audio_name }}
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          import re
+          import urllib.error
+          import urllib.request
+          from pathlib import Path
+
+          voice_id = os.environ["ELEVENLABS_VOICE_ID"].strip()
+          text = os.environ["NARRATION"].strip()
+          audio_name = re.sub(r"[^a-zA-Z0-9_-]+", "-", os.environ["AUDIO_NAME"]).strip("-") or "narracion-biblica"
+          url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}?output_format=mp3_44100_128"
+          payload = {
+              "text": text,
+              "model_id": "eleven_multilingual_v2",
+              "language_code": "es",
+              "voice_settings": {
+                  "stability": 0.58,
+                  "similarity_boost": 0.82,
+                  "style": 0.25,
+                  "use_speaker_boost": True
+              }
+          }
+          request = urllib.request.Request(
+              url,
+              data=json.dumps(payload).encode("utf-8"),
+              headers={
+                  "xi-api-key": os.environ["ELEVENLABS_API_KEY"],
+                  "Content-Type": "application/json",
+                  "Accept": "audio/mpeg"
+              },
+              method="POST"
+          )
+          try:
+              with urllib.request.urlopen(request, timeout=180) as response:
+                  audio = response.read()
+          except urllib.error.HTTPError as exc:
+              detail = exc.read().decode("utf-8", errors="replace")[:1000]
+              raise SystemExit(f"ElevenLabs devolvió HTTP {exc.code}: {detail}")
+          if not audio.startswith(b"ID3") and not audio.startswith(b"\xff\xfb") and not audio.startswith(b"\xff\xf3") and not audio.startswith(b"\xff\xf2"):
+              raise SystemExit("La respuesta no parece ser un archivo MP3 válido.")
+          Path("output").mkdir(exist_ok=True)
+          Path(f"output/{audio_name}.mp3").write_bytes(audio)
+          print(f"Audio MP3 creado: output/{audio_name}.mp3 ({len(audio)} bytes)")
+          PY
+
+      - name: Guardar audio como artefacto
+        uses: actions/upload-artifact@v4
+        with:
+          name: aliento-del-cielo-audio-espanol
+          path: output/*.mp3
+          if-no-files-found: error
+          retention-days: 14
